@@ -38,27 +38,15 @@
 
 ## 安装
 
-**macOS**
+从 [GitHub Release](https://github.com/full-coder/pinshot/releases) 下载对应平台的安装包：
 
-1. 下载对应芯片的 DMG 拖进「应用程序」（Apple Silicon 用 `arm64`，Intel 用 `x86_64`），或直接 `pnpm tauri build` 后运行 `scripts/install.sh`。
-2. 首次截图会请求 **屏幕录制** 权限：系统设置 → 隐私与安全性 → 屏幕录制 → 勾选 PinShot → 重启应用。
-3. 「辅助功能」权限只在需要**读取滚动位置**（让长图拼接更准）时才会被问到，不给也能用。
+- **macOS**：`PinShot_0.1.0_arm64.dmg`（Apple Silicon）或 `PinShot_0.1.0_x86_64.dmg`（Intel），拖进「应用程序」即可。
+- **Windows**：`PinShot_0.1.0_x64-setup.exe`（安装版）或 `PinShot.exe`（免安装）。需要 Windows 10/11 x64 + WebView2；程序未签名，SmartScreen 提示「未知发布者」时选「仍要运行」。
+- **源码**：`PinShot-src-0.1.0.zip`，或 clone 本仓库自行构建（见[从源码构建](#从源码构建)）。
 
-**Windows**
+macOS 首次截图会请求**屏幕录制**权限（系统设置 → 隐私与安全性 → 屏幕录制），「辅助功能」只在需要读取滚动位置时用到。
 
-> ⚠️ **先看这里**：[`docs/PinShot-Windows-0.1.0/`](docs/PinShot-Windows-0.1.0/) 里提供的
-> `PinShot_0.1.0_x64-setup.exe` 和 `PinShot.exe` 是 **2026-11-13/14 的旧构建**，
-> **不是当前最新代码**——不含此后源码的修复与新功能（如滚动截屏的 Windows 操作提示、
-> 导出性能优化、滚动截屏回车回归修复等）。这个包由 macOS 交叉编译产出，Windows 实机只做过
-> 基础验证，**没有针对最新代码做过真机详细测试**。
->
-> **建议：在 Windows 上用当前源码自己打包**（见下方[从源码构建](#从源码构建)），这样才是最新代码。
-> 本机的 macOS 环境无法完整交叉编译验证 Windows 版，实际运行效果请在 Windows 真机自测。
-
-1. 若只用旧包：运行 `PinShot_0.1.0_x64-setup.exe`（装到 `%LOCALAPPDATA%\PinShot`），或用免安装的 `PinShot.exe`。
-2. 需要 Windows 10/11 x64 + WebView2（Win11 自带，Win10 一般已随 Edge 安装）。
-3. 程序未签名，SmartScreen 提示「未知发布者」时选「仍要运行」。
-4. 已经运行时再启动一次不会多开：会切到已经在跑的实例并打开「设置」。
+已安装时再启动一次不会多开：会切到运行中的实例并打开「设置」。
 
 ## 常用操作
 
@@ -151,26 +139,6 @@ pnpm tauri build --bundles nsis
 打包器会从 GitHub 下载 NSIS；网络不稳时先设
 `$env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"`。MSI 还要额外下载 WiX，
 没有 WiX 就只打 NSIS。细节见 [docs/WINDOWS.md](docs/WINDOWS.md)。
-
-### 分发产物与 GitHub Release
-
-打好的安装包放在本地 `docs/` 下，**按设计不提交进 git**（`.gitignore` 已忽略 `docs/*.dmg`、
-`docs/*.zip`、`docs/PinShot-Windows-*/`）：二进制每次发版都能重新生成，提交进仓库只会让 git
-历史永久膨胀几十 MB，而且以后想改就得重写历史。
-
-**要分发就把这些文件上传到 GitHub Release**（仓库的 Releases 页面 → Draft a new release → 添加附件），
-每个版本各传一份：
-
-- `docs/PinShot_0.1.0_arm64.dmg` — macOS Apple Silicon
-- `docs/PinShot_0.1.0_x86_64.dmg` — macOS Intel
-- `docs/PinShot-src-0.1.0.zip` — 源码包
-- Windows 安装包：用当前源码在 Windows 上自行打包后上传（见上方 [从源码构建](#从源码构建)）。
-
-> 注意：`docs/PinShot-Windows-0.1.0/` 里那份是 11-13/14 的旧构建，**不建议作为发布附件上传**；
-> 发版请用最新源码重新打包的 Windows 安装包。GitHub Release 也支持直接挂源码压缩包，但这里推荐
-> 用上面自己生成的 `PinShot-src-0.1.0.zip`（已排除 `target/`、`node_modules/` 等生成物）。
-
-如果确实要临时把这些文件放进仓库，得先删掉 `.gitignore` 里对应的几行再 `git add -f`，但不推荐这么做。
 
 测试与检查：
 
