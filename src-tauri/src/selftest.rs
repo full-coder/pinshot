@@ -943,6 +943,65 @@ pub(crate) fn install(app: &AppHandle) {
         });
     }
 
+    // `--wake-drag-selftest x1,y1,x2,y2` reproduces the sleep/wake capture bug: a display
+    // waking mid-drag delivers a mousemove with buttons=0. The region must still commit
+    // and the toolbar must appear (not be mistaken for a rectangle annotation).
+    if let Some(spec) = std::env::args()
+        .skip_while(|arg| arg != "--wake-drag-selftest")
+        .nth(1)
+    {
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            let numbers: Vec<i32> = spec
+                .split(',')
+                .filter_map(|part| part.trim().parse().ok())
+                .collect();
+            let [x1, y1, x2, y2] = numbers.as_slice() else {
+                diag("wake-drag-selftest: spec must be x1,y1,x2,y2");
+                return;
+            };
+            start_capture(handle.clone());
+            for _ in 0..60 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                if handle.get_webview_window("overlay-0").is_some() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+            let Some(window) = handle.get_webview_window("overlay-0") else {
+                diag("wake-drag-selftest: no overlay window");
+                return;
+            };
+            let script = format!(
+                r#"(async () => {{
+                  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+                  const fire = (type, x, y, buttons) => window.dispatchEvent(new MouseEvent(type, {{
+                    clientX: x, clientY: y, button: 0, buttons, bubbles: true, cancelable: true
+                  }}));
+                  const log = (m) => window.__TAURI_INTERNALS__.invoke('overlay_error', {{
+                    index: 0, message: 'wake-drag: ' + m }});
+                  fire('mousedown', {x1}, {y1}, 1);
+                  fire('mousemove', {x2}, {y2}, 1);
+                  // Wake from sleep: the system sends a move with no button held.
+                  fire('mousemove', {x2}, {y2}, 0);
+                  await wait(100);
+                  fire('mouseup', {x2}, {y2}, 0);
+                  await wait(300);
+                  const toolbar = document.querySelector('.toolbar');
+                  const hint = document.querySelector('.stage > .hint');
+                  log('toolbar=' + (toolbar ? 'shown' : 'MISSING') +
+                      ' hint=' + (hint ? hint.textContent.trim() : 'none'));
+                }})();"#
+            );
+            if let Err(error) = window.eval(&script) {
+                diag(&format!("wake-drag-selftest: eval failed: {error}"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            close_overlays(&handle);
+            handle.exit(0);
+        });
+    }
+
     // `--auto-commit <ms>` fires the same event the modal keys produce, so the
     // whole capture → overlay → export path can be tested without synthetic
     // keyboard input (which macOS routes by window-server focus).

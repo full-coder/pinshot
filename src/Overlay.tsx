@@ -874,6 +874,19 @@ export function Overlay() {
       // A mouseup that happened outside the window never reaches us; without this the
       // element kept following the pointer with no button held.
       if (event.buttons === 0 && (dragRef.current || moveRef.current || resizeRef.current)) {
+        // A display waking from sleep can deliver a mousemove with buttons=0 mid-drag.
+        // Commit an in-progress *region* drag as the selection instead of dropping it:
+        // otherwise `dragRef` is gone but `draftRef` (the rectangle) survives, and the
+        // next mouseup mistakes it for a rectangle annotation — the region never becomes
+        // a selection, so the toolbar never appears and the user sees only the dim mask.
+        const drag = dragRef.current;
+        if (drag && !selectionRef.current && !moveRef.current && !resizeRef.current) {
+          const rect = rectFromCorners(drag.start, drag.current);
+          selectionRef.current = rectIsEmpty(rect, MIN_DRAG)
+            ? { x: 0, y: 0, w: info()?.pointsWidth ?? 0, h: info()?.pointsHeight ?? 0 }
+            : rect;
+          draftRef.current = null;
+        }
         dragRef.current = null;
         moveRef.current = null;
         resizeRef.current = null;
@@ -1052,6 +1065,13 @@ export function Overlay() {
 
       const draft = draftRef.current;
       draftRef.current = null;
+      // Without a committed selection this gesture was a region drag, not an annotation.
+      // Never turn a leftover rectangle draft into a shape — that is what made a region
+      // capture look like the rectangle tool had drawn on the frozen frame.
+      if (!selectionRef.current) {
+        paint();
+        return;
+      }
       if (!draft) {
         paint();
         return;
