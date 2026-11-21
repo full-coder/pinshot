@@ -1,0 +1,7 @@
+# esbuild ships its binary as a platform package; only the install hook needs to run.
+# pnpm 10 reads `onlyBuiltDependencies`, pnpm 11+ reads `allowBuilds`; keeping both makes
+# a fresh `pnpm install` quiet on macOS and Windows alike.
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

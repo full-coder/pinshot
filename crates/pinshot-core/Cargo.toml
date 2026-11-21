@@ -1,0 +1,10 @@
+[package]
+name = "pinshot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Geometry, image container, errors and configuration shared by every PinShot crate"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

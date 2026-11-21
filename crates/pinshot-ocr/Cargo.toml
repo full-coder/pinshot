@@ -1,0 +1,18 @@
+[package]
+name = "pinshot-ocr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pinshot-core = { version = "0.1.0", path = "../pinshot-core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+objc2-foundation = "0.3"
+objc2-vision = "0.3"
+
+[dev-dependencies]
+image = "0.25.10"
