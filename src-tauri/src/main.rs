@@ -2042,6 +2042,51 @@ fn schedule_idle_release(app: &AppHandle) {
     });
 }
 
+/// Keeps the window server's cached display surface alive across long idle spells.
+///
+/// Measured on macOS: after ~150 s without a grab, the first capture's screen grab
+/// grows from ~120 ms to ~230 ms and `RegisterEventHotKey` from ~40 ms to ~150 ms,
+/// so the first screenshot after a break lands in ~310 ms instead of ~130 ms. The
+/// one-off grab at launch cannot hold that for a whole session. A throwaway grab
+/// every 8 s keeps the surface ready; the bytes are discarded immediately —
+/// nothing is stored, saved or shown. Active captures already keep the backend
+/// warm, so the pulse skips them. `keep_warm` off means the user traded the
+/// first-capture latency for battery, so honour that here too.
+fn keep_warm_pulse(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        // A one-off jitter keeps the pulse from landing exactly on a hotkey press.
+        // Two concurrent grabs were measured ~70 ms slower than either alone, so a
+        // pulse that always fired on a round multiple of the interval could fight
+        // a scripted (or habitual) capture at the same instant.
+        let jitter = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.subsec_millis() as u64 % 4000)
+            .unwrap_or(0);
+        std::thread::sleep(std::time::Duration::from_millis(jitter));
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            {
+                let state = handle.state::<AppState>();
+                if !state.keep_warm.load(Ordering::SeqCst) || overlay_is_open(&handle) {
+                    continue;
+                }
+            }
+            let started = std::time::Instant::now();
+            let backend = system();
+            if let Ok(monitors) = backend.monitors() {
+                if let Some(monitor) = monitors.first() {
+                    let _ = backend.grab(monitor);
+                }
+            }
+            let elapsed = started.elapsed().as_millis();
+            if elapsed > 250 {
+                diag(&format!("keep-warm: grab took {elapsed} ms"));
+            }
+        }
+    });
+}
+
 /// Whether a settings/history window is up, which needs a normal (Dock) app.
 fn aux_window_visible(app: &AppHandle) -> bool {
     ["settings", "history"].iter().any(|name| {
@@ -2787,6 +2832,11 @@ fn main() {
                 // first click on F1 does not pay for it.
                 std::thread::sleep(std::time::Duration::from_millis(400));
                 prewarm_overlays(&warm_handle);
+                // Hold the capture backend warm for the whole session, not just the
+                // launch: the first screenshot after a long break otherwise pays a
+                // ~180 ms window-server cold-start penalty. The pulse checks
+                // `keep_warm` itself, so a runtime toggle is honoured too.
+                keep_warm_pulse(&warm_handle);
                 if !keep_warm {
                     schedule_idle_release(&warm_handle);
                 }
