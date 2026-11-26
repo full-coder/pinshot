@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -37,8 +38,23 @@ type Meta = {
   /** This monitor's top-left in the global virtual desktop (points). */
   originX: number;
   originY: number;
+  /** Initial folder for the native save picker. */
+  saveDir: string;
   initialRegion?: { x: number; y: number; w: number; h: number } | null;
 };
+
+async function chooseSaveDirectory(defaultPath: string): Promise<boolean> {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: defaultPath || undefined,
+    title: t("overlay.save.pick_folder"),
+  });
+  const directory = Array.isArray(selected) ? selected[0] : selected;
+  if (!directory) return false;
+  await invoke("set_save_dir", { directory });
+  return true;
+}
 
 const MIN_DRAG = 3;
 /** How far (in points) from a shape still counts as clicking it. */
@@ -218,11 +234,11 @@ export function Overlay() {
   const [scrollFrames, setScrollFrames] = useState<number | null>(null);
   /** Frames dropped because the page jumped between captures (scrolled too fast). */
   const [skippedFrames, setSkippedFrames] = useState(0);
-  const [longShot, setLongShot] = useState<{ url: string; bytes: Uint8Array } | null>(null);
+  const [longShot, setLongShot] = useState<{ url: string; blob: Blob } | null>(null);
   const longShotUrlRef = useRef<string | null>(null);
-  /** Swap the long-image result, revoking the old object URL. Without this the PNG bytes
-   * stay pinned for the whole life of this long-lived (warm) page on every scroll shot. */
-  const setLongShotSafe = useCallback((next: { url: string; bytes: Uint8Array } | null) => {
+  /** Swap the long-image result, revoking the old object URL. The Blob owns the PNG
+   * bytes; keeping a second Uint8Array pinned another full copy on this warm page. */
+  const setLongShotSafe = useCallback((next: { url: string; blob: Blob } | null) => {
     const previous = longShotUrlRef.current;
     if (previous && previous !== next?.url) URL.revokeObjectURL(previous);
     longShotUrlRef.current = next?.url ?? null;
@@ -429,6 +445,13 @@ export function Overlay() {
     moveRef.current = null;
     resizeRef.current = null;
     imageRef.current = null;
+    const background = backgroundRef.current;
+    if (background) {
+      // The detached canvas would otherwise keep its full-screen backing store alive
+      // until a GC that may never run while this warm page sits idle.
+      background.width = 1;
+      background.height = 1;
+    }
     backgroundRef.current = null;
     metaRef.current = null;
     setMeta(null);
@@ -445,7 +468,11 @@ export function Overlay() {
     const canvas = canvasRef.current;
     if (canvas) {
       // Dropping the backing store matters: 2880×1800 is a 20 MB surface, and the page
-      // now stays alive between captures.
+      // now stays alive between captures. Remove the compositor layer first, then shrink
+      // the CSS box and bitmap so WebKit does not stretch 1×1 pixels across the display.
+      canvas.style.display = "none";
+      canvas.style.width = "1px";
+      canvas.style.height = "1px";
       canvas.width = 1;
       canvas.height = 1;
     }
@@ -510,6 +537,9 @@ export function Overlay() {
       setSelection(preset);
       paint();
       mark("paint");
+      // Size and paint while the element is detached from compositing; revealing the
+      // finished layer avoids a full-screen layout/allocation on the visible frame.
+      if (canvas) canvas.style.display = "block";
       // One line per capture: the click-to-pixels budget is what makes the tool feel
       // instant, so the numbers have to be visible in the log.
       void invoke("overlay_error", {
@@ -622,8 +652,9 @@ export function Overlay() {
             // in flight. Don't paint a stale long image over the fresh selection.
             if (serialRef.current !== resultSerial) return;
             const bytes = new Uint8Array(buffer);
-            const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-            setLongShotSafe({ url, bytes });
+            const blob = new Blob([bytes], { type: "image/png" });
+            const url = URL.createObjectURL(blob);
+            setLongShotSafe({ url, blob });
           } catch (cause) {
             setError(String(cause));
           }
@@ -663,6 +694,10 @@ export function Overlay() {
       if (area.w < 1 || area.h < 1) return;
       setBusy(true);
       try {
+        if (action === "file" && !(await chooseSaveDirectory(info.saveDir))) {
+          setBusy(false);
+          return;
+        }
         const model = modelRef.current;
         if (model.size === 0) {
           // No annotations: let Rust crop the original frame. It is both faster and
@@ -814,19 +849,20 @@ export function Overlay() {
   // The stitched long image is exported as-is: it is already at native resolution and
   // far taller than the window, so annotating it needs the scrollable result view that
   // lands with M5.
-  const copyLongShot = useCallback(async (bytes: Uint8Array) => {
+  const copyLongShot = useCallback(async (blob: Blob) => {
     try {
       await invoke("set_export_scale", { scale: 1 });
-      await invoke("copy_png", bytes);
+      await invoke("copy_png", new Uint8Array(await blob.arrayBuffer()));
     } catch (cause) {
       setError(String(cause));
     }
   }, []);
 
-  const saveLongShot = useCallback(async (bytes: Uint8Array) => {
+  const saveLongShot = useCallback(async (blob: Blob) => {
     try {
+      if (!(await chooseSaveDirectory(metaRef.current?.saveDir ?? ""))) return;
       await invoke("set_export_scale", { scale: 1 });
-      await invoke("save_png", bytes);
+      await invoke("save_png", new Uint8Array(await blob.arrayBuffer()));
     } catch (cause) {
       setError(String(cause));
     }
@@ -1273,12 +1309,12 @@ export function Overlay() {
         <div className="toolbar" style={{ left: "50%", top: 12, transform: "translateX(-50%)" }}>
           <button
             className="primary"
-            onClick={() => void copyLongShot(longShot.bytes)}
+            onClick={() => void copyLongShot(longShot.blob)}
             title={t("overlay.longshot.copy.title")}
           >
             {t("overlay.longshot.copy")}
           </button>
-          <button onClick={() => void saveLongShot(longShot.bytes)}>
+          <button onClick={() => void saveLongShot(longShot.blob)}>
             {t("overlay.longshot.save")}
           </button>
           <button onClick={() => void cancel()}>{t("app.close")}</button>

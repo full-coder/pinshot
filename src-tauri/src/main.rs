@@ -7,6 +7,7 @@ use pinshot_app::{ExportOptions, Session};
 use pinshot_capture::{system, Permission};
 use pinshot_core::{Config, Monitor, Rect};
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
@@ -61,6 +62,8 @@ struct AppState {
     hotkeys: std::sync::Mutex<Vec<(Code, Modifiers, HotkeyAction)>>,
     /// Display scale of the overlay that is exporting, in `f32::to_bits` form.
     export_scale: AtomicU32,
+    /// Folder chosen by the native picker for the next file export.
+    save_dir: Mutex<Option<PathBuf>>,
     /// Global point where the next pin should appear (the selection's screen position).
     /// Set by the overlay just before `pin_png`; consumed (and cleared) by `pin_window`.
     pin_origin: Mutex<Option<(i32, i32)>>,
@@ -90,6 +93,8 @@ struct MetaDto {
     /// overlay can place a pin at the selection's real screen position.
     origin_x: i32,
     origin_y: i32,
+    /// Initial folder for the native save picker.
+    save_dir: String,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -103,6 +108,21 @@ struct RegionDto {
 #[tauri::command]
 fn set_export_scale(state: State<'_, AppState>, scale: f32) {
     state.export_scale.store(scale.to_bits(), Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn set_save_dir(state: State<'_, AppState>, directory: String) {
+    if let Ok(mut slot) = state.save_dir.lock() {
+        *slot = Some(PathBuf::from(directory));
+    }
+}
+
+fn take_save_dir(state: &AppState) -> Option<PathBuf> {
+    state
+        .save_dir
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
 }
 
 /// Records where the overlay's current selection sits on the real screen, so the pin
@@ -195,15 +215,16 @@ fn overlay_meta(app: AppHandle, index: usize) -> Result<MetaDto, String> {
             _ => None,
         }
     });
-    let (dim, magnifier_zoom) = session
+    let (dim, magnifier_zoom, save_dir) = session
         .as_ref()
         .map(|session| {
             (
                 session.config.capture.dim,
                 session.config.capture.magnifier_zoom,
+                session.config.export.save_dir.display().to_string(),
             )
         })
-        .unwrap_or((0.5, 8));
+        .unwrap_or((0.5, 8, String::new()));
     Ok(MetaDto {
         index,
         points_width: monitor.bounds.w,
@@ -222,6 +243,7 @@ fn overlay_meta(app: AppHandle, index: usize) -> Result<MetaDto, String> {
         initial_region,
         origin_x: monitor.bounds.x,
         origin_y: monitor.bounds.y,
+        save_dir,
     })
 }
 
@@ -384,6 +406,7 @@ async fn capture_commit(
 
     let save = action == "file";
     let pin = action == "pin";
+    let selected_dir = take_save_dir(&state);
     let (scale, monitor_origin) = state
         .monitors
         .lock()
@@ -403,6 +426,9 @@ async fn capture_commit(
         // pixels from there, exactly like a pin restored from the tray.
         options.clipboard = !save && !pin;
         options.save_to_file = save;
+        if let Some(directory) = selected_dir {
+            options.dir = directory;
+        }
         let exported = pinshot_app::export(
             &session,
             index,
@@ -488,8 +514,10 @@ fn save_png(
 ) -> Result<ExportDto, String> {
     let bytes = raw_png(&request)?;
     let image = pinshot_app::decode_png(&bytes).map_err(|error| error.to_string())?;
+    let selected_dir = take_save_dir(&state);
     let (config, _) = Config::load();
-    let path = pinshot_app::write_file(&config.export.save_dir, None, &bytes)
+    let directory = selected_dir.unwrap_or(config.export.save_dir);
+    let path = pinshot_app::write_file(&directory, None, &bytes)
         .map_err(|error| error.to_string())?;
     let exported = pinshot_app::Export {
         path: Some(path.clone()),
@@ -1179,6 +1207,12 @@ async fn scroll_start(
         .get(index)
         .cloned()
         .ok_or_else(|| format!("monitor {index} is not part of this capture"))?;
+
+    // A previous long image is no longer needed once a new scroll run owns the overlay.
+    // Without this, its PNG stayed resident until another scroll or app exit.
+    if let Ok(mut slot) = state.scroll_result.lock() {
+        *slot = None;
+    }
 
     // Region in the monitor's pixel space, and the global point the wheel is posted at.
     let region = monitor.rect_to_pixel(Rect::new(x, y, width, height));
@@ -2278,13 +2312,26 @@ fn overlay_action(shortcut: &Shortcut) -> Option<&'static str> {
     }
 }
 
+fn clear_capture_results(state: &AppState) {
+    if let Ok(mut slot) = state.session.lock() {
+        *slot = None;
+    }
+    // The stitched PNG is handed to the webview once; keeping it here after the result
+    // view closes pinned a second full copy for the rest of the process lifetime.
+    let scroll_result = state.scroll_result.lock();
+    if let Ok(mut slot) = scroll_result {
+        *slot = None;
+    }
+    let save_dir = state.save_dir.lock();
+    if let Ok(mut slot) = save_dir {
+        *slot = None;
+    }
+}
+
 fn reset(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.overlay_open.store(false, Ordering::SeqCst);
-    let session_slot = state.session.lock();
-    if let Ok(mut slot) = session_slot {
-        *slot = None;
-    }
+    clear_capture_results(&state);
     // The monitor list is deliberately kept: it describes the layout the (still warm)
     // overlay windows were built for, and `overlays_are_warm` compares against it.
 }
@@ -2690,6 +2737,7 @@ fn main() {
             let _ = open_window(app.clone(), "settings".into());
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -2781,6 +2829,7 @@ fn main() {
             scroll_result,
             capture_commit,
             set_export_scale,
+            set_save_dir,
             set_pin_origin,
             copy_png,
             save_png,
@@ -2868,6 +2917,16 @@ mod tests {
         // must stay hidden so they don't cover the new capture.
         assert!(should_reveal_overlays(7, 7));
         assert!(!should_reveal_overlays(8, 7));
+    }
+
+    #[test]
+    fn clearing_capture_results_drops_the_stitched_png() {
+        let state = AppState::default();
+        *state.scroll_result.lock().unwrap() = Some(vec![1, 2, 3]);
+        *state.save_dir.lock().unwrap() = Some(PathBuf::from("/tmp/chosen"));
+        clear_capture_results(&state);
+        assert!(state.scroll_result.lock().unwrap().is_none());
+        assert!(state.save_dir.lock().unwrap().is_none());
     }
 
     #[test]
