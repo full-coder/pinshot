@@ -41,7 +41,7 @@
 从 [GitHub Release](https://github.com/full-coder/pinshot/releases) 下载对应平台的安装包：
 
 - **macOS**：`PinShot_0.1.0_arm64.dmg`（Apple Silicon）或 `PinShot_0.1.0_x86_64.dmg`（Intel），拖进「应用程序」即可。
-- **Windows**：`PinShot_0.1.0_x64-setup.exe`（安装版）或 `PinShot.exe`（免安装）。需要 Windows 10/11 x64 + WebView2；程序未签名，SmartScreen 提示「未知发布者」时选「仍要运行」。
+- **Windows**：`PinShot_0.1.0_x64-setup.exe`（安装版）或 `PinShot-portable.exe`（免安装）。需要 Windows 10/11 x64 + WebView2；程序未签名，SmartScreen 提示「未知发布者」时选「仍要运行」。
 - **源码**：`PinShot-src-0.1.0.zip`，或 clone 本仓库自行构建（见[从源码构建](#从源码构建)）。
 
 macOS 首次截图会请求**屏幕录制**权限（系统设置 → 隐私与安全性 → 屏幕录制），「辅助功能」只在需要读取滚动位置时用到。
@@ -164,7 +164,7 @@ src/                Overlay / Settings / History / Pin 四个视图
                     + scene/render（场景与唯一渲染器）、Toolbar、magnifier、i18n、shortcut
 src-tauri/          托盘、热键、覆盖层窗口、IPC
                     platform.rs（AppKit 桥接）、selftest.rs（调试钩子）
-docs/               STATUS（实测记录）、WINDOWS（平台支持），以及打好的 DMG / 源码包
+docs/               STATUS（实测记录）、WINDOWS（平台支持），以及发布用安装包 / 源码包
 ```
 
 三个值得知道的设计：

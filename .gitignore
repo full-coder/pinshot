@@ -25,6 +25,7 @@ node_modules/
 # (Attach them to a GitHub Release, or un-ignore these lines if you prefer them in-repo.)
 /docs/*.dmg
 /docs/*.zip
+/docs/*.exe
 /docs/PinShot-Windows-*/
 
 # OS

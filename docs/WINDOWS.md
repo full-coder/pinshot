@@ -3,12 +3,10 @@
 **结论**：同一份源码现在两边都能打。macOS 用 CoreGraphics/AppKit；Windows 用 GDI +
 SendInput，截图、标注、导出、贴图、历史、设置、手动滚动截屏在 Windows 10/11 x64 上可用。
 
-> ⚠️ **构建与测试状态**：`docs/PinShot-Windows-0.1.0/` 里的安装包是 **2026-11-13/14 的旧构建**，
-> 不是当前最新源码；当时 Windows 实机只做过基础验证，**当前最新代码未在 Windows 真机详细测试**。
-> 本机是 macOS，完整 Windows app 无法在这里交叉编译验证（缺 MSVC 头文件 / sqlite C 编译问题）。
-> 要拿到最新代码请用当前源码在 Windows 上自行打包（见下方[构建](#构建)），并自行在真机验证。
-> 下表功能中，最新加入的 Windows 滚动截屏提示（`tauri-plugin-notification`）仅做了 Windows target
-> 交叉编译检查，是否真正弹出通知需 Windows 实机确认。
+> 📦 **当前 Windows 包**：`PinShot_0.1.0_x64-setup.exe`（安装版）和 `PinShot-portable.exe`
+> （免安装版）已于 2026-11-27 更新，可从 [GitHub Release](https://github.com/full-coder/pinshot/releases/tag/v0.1.0) 下载。
+> `docs/PinShot-Windows-0.1.0/` 保留的是 2026-11-13/14 的旧构建，请勿与当前包混用。
+> 本机是 macOS，无法运行 Windows 包复验；下列 Windows 真机记录来自此前验证。
 
 | 功能 | macOS | Windows |
 | --- | --- | --- |
@@ -22,8 +20,8 @@ SendInput，截图、标注、导出、贴图、历史、设置、手动滚动�
 | OCR（提取文字） | ✅ Vision | ❌ 未移植，会提示仅 macOS 支持 |
 | 开机启动 | LaunchAgent | `HKCU\...\CurrentVersion\Run` |
 
-打好的 Windows 安装器、免安装 exe 和当时的源码在
-[`docs/PinShot-Windows-0.1.0/`](PinShot-Windows-0.1.0/)。
+最新安装版和免安装版见 [GitHub Release](https://github.com/full-coder/pinshot/releases/tag/v0.1.0)；
+`docs/PinShot-Windows-0.1.0/` 保留 2026-11-13/14 的旧构建和当时的源码。
 
 ## 构建
 
